@@ -57,7 +57,7 @@ const Sidebar = ({ highlightedDate, score = 0 }) => {
   const weeks = buildMonthMatrix(year, month);
 
   return (
-    <div className="flex h-full shrink-0">
+    <div className="hidden h-full shrink-0 sm:flex">
       <div className="flex w-12 flex-col items-center gap-1 border-r bg-[#f3f2f1] py-2">
         {ICON_RAIL_ITEMS.map(({ icon: Icon, active }, i) => (
           <button

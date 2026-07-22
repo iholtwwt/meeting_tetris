@@ -1,5 +1,5 @@
-import React from 'react';
-import { Calendar, ChevronLeft, ChevronRight, ChevronDown, Plus, RotateCw } from 'lucide-react';
+import React, { useState, useEffect } from 'react';
+import { Calendar, ChevronLeft, ChevronRight, ChevronDown, Plus, RotateCw, ArrowLeft, ArrowRight, ArrowDown, RotateCcw } from 'lucide-react';
 import { useTetris } from '../hooks/useTetris';
 import Sidebar from './Sidebar';
 import {
@@ -11,13 +11,142 @@ import {
   getRowHourLabel,
 } from '../game/constants';
 
-const CELL_SIZE = 32;
-const GUTTER_WIDTH = 56;
+const MAX_CELL_SIZE = 32;
+const MIN_CELL_SIZE = 18;
+
+// Computes a cell size (and matching gutter width) that keeps the whole
+// board visible on narrow/mobile viewports instead of overflowing.
+const useResponsiveMetrics = () => {
+  const [metrics, setMetrics] = useState({ cellSize: MAX_CELL_SIZE, gutterWidth: 56 });
+
+  useEffect(() => {
+    const compute = () => {
+      const isMobile = window.innerWidth < 640;
+      const gutterWidth = isMobile ? 36 : 56;
+      const available = window.innerWidth - gutterWidth - (isMobile ? 8 : 16);
+      const maxFit = Math.floor(available / COLS);
+      const cellSize = Math.max(MIN_CELL_SIZE, Math.min(MAX_CELL_SIZE, maxFit));
+      setMetrics({ cellSize, gutterWidth });
+    };
+    compute();
+    window.addEventListener('resize', compute);
+    return () => window.removeEventListener('resize', compute);
+  }, []);
+
+  return metrics;
+};
 
 const monthName = (date) => date.toLocaleDateString('en-US', { month: 'long' });
 
+const getConnectedGroups = (gridArr) => {
+  const rows = gridArr.length;
+  const cols = rows ? gridArr[0].length : 0;
+  const visited = Array.from({ length: rows }, () => Array(cols).fill(false));
+  const groups = [];
+
+  for (let y = 0; y < rows; y++) {
+    for (let x = 0; x < cols; x++) {
+      const type = gridArr[y][x];
+      if (!type || visited[y][x]) continue;
+
+      const stack = [[x, y]];
+      visited[y][x] = true;
+      const cells = [];
+
+      while (stack.length) {
+        const [cx, cy] = stack.pop();
+        cells.push([cx, cy]);
+
+        const neighbors = [[cx + 1, cy], [cx - 1, cy], [cx, cy + 1], [cx, cy - 1]];
+        for (const [nx, ny] of neighbors) {
+          if (
+            nx >= 0 && nx < cols && ny >= 0 && ny < rows &&
+            !visited[ny][nx] && gridArr[ny][nx] === type
+          ) {
+            visited[ny][nx] = true;
+            stack.push([nx, ny]);
+          }
+        }
+      }
+
+      groups.push({ type, cells });
+    }
+  }
+
+  return groups;
+};
+
+// Finds the widest contiguous row or column within a piece's cells and
+// returns a pixel-space box for that run, so the title can sit in the
+// widest part of the shape and rotate to follow vertical runs.
+const getWidestRunBox = (cells, cellSize) => {
+  const rowExtent = new Map();
+  const colExtent = new Map();
+
+  cells.forEach(([x, y]) => {
+    const row = rowExtent.get(y) || { minX: x, maxX: x, count: 0 };
+    row.minX = Math.min(row.minX, x);
+    row.maxX = Math.max(row.maxX, x);
+    row.count += 1;
+    rowExtent.set(y, row);
+
+    const col = colExtent.get(x) || { minY: y, maxY: y, count: 0 };
+    col.minY = Math.min(col.minY, y);
+    col.maxY = Math.max(col.maxY, y);
+    col.count += 1;
+    colExtent.set(x, col);
+  });
+
+  let bestRow = null;
+  rowExtent.forEach((extent, y) => {
+    if (!bestRow || extent.count > bestRow.count) bestRow = { ...extent, y };
+  });
+
+  let bestCol = null;
+  colExtent.forEach((extent, x) => {
+    if (!bestCol || extent.count > bestCol.count) bestCol = { ...extent, x };
+  });
+
+  if (bestCol && bestCol.count > bestRow.count) {
+    return {
+      vertical: true,
+      left: bestCol.x * cellSize,
+      top: bestCol.minY * cellSize,
+      width: cellSize,
+      height: (bestCol.maxY - bestCol.minY + 1) * cellSize,
+    };
+  }
+
+  return {
+    vertical: false,
+    left: bestRow.minX * cellSize,
+    top: bestRow.y * cellSize,
+    width: (bestRow.maxX - bestRow.minX + 1) * cellSize,
+    height: cellSize,
+  };
+};
+
+const PieceLabel = ({ box, className }) => (
+  <div
+    className="pointer-events-none absolute flex items-center justify-center overflow-hidden"
+    style={{ left: box.left, top: box.top, width: box.width, height: box.height }}
+  >
+    <span
+      className={`px-0.5 text-center leading-tight ${className}`}
+      style={{
+        display: 'inline-block',
+        width: box.vertical ? box.height : box.width,
+        transform: box.vertical ? 'rotate(-90deg)' : 'none',
+      }}
+    >
+      {box.label}
+    </span>
+  </div>
+);
+
 const GameView = () => {
-  const { grid, activePiece, status, score } = useTetris();
+  const { grid, activePiece, status, score, movePiece, rotatePiece, hardDrop } = useTetris();
+  const { cellSize: CELL_SIZE, gutterWidth: GUTTER_WIDTH } = useResponsiveMetrics();
 
   const startDate = getColumnDate(0);
   const endDate = getColumnDate(COLS - 1);
@@ -62,28 +191,36 @@ const GameView = () => {
     if (isActive) {
       return (
         <div
-          className={`relative flex items-center justify-center rounded-[3px] shadow-sm ${data.solidBg} m-[1px]`}
+          className={`rounded-[3px] shadow-sm ${data.solidBg} m-[1px]`}
           style={{ width: CELL_SIZE - 2, height: CELL_SIZE - 2 }}
-        >
-          <span className="px-0.5 text-center text-[6.5px] font-semibold leading-tight text-white truncate">
-            {data.label}
-          </span>
-        </div>
+        />
       );
     }
 
     return (
       <div
-        className={`relative flex items-center justify-center rounded-[3px] border ${data.border} border-l-[3px] bg-white shadow-sm m-[1px]`}
+        className={`relative rounded-[3px] border ${data.border} border-l-[3px] bg-white shadow-sm m-[1px]`}
         style={{ width: CELL_SIZE - 2, height: CELL_SIZE - 2 }}
       >
-        <span className={`px-0.5 text-center text-[6.5px] font-medium leading-tight ${data.text} truncate`}>
-          {data.label}
-        </span>
         <RotateCw className="absolute right-[1px] top-[1px] h-[6px] w-[6px] text-gray-400" />
       </div>
     );
   };
+
+  const settledGroups = getConnectedGroups(grid);
+  const touchControls = [
+    { label: 'Left', icon: ArrowLeft, onPress: () => movePiece(-1, 0) },
+    { label: 'Rotate', icon: RotateCcw, onPress: () => rotatePiece() },
+    { label: 'Right', icon: ArrowRight, onPress: () => movePiece(1, 0) },
+    { label: 'Down', icon: ArrowDown, onPress: () => hardDrop() },
+  ];
+
+  const activeCellCoords = [];
+  activePiece.shape.forEach((row, y) => {
+    row.forEach((cell, x) => {
+      if (cell) activeCellCoords.push([activePiece.pos.x + x, activePiece.pos.y + y]);
+    });
+  });
 
   return (
     <div className="flex h-full w-full bg-gray-50 font-sans">
@@ -107,6 +244,9 @@ const GameView = () => {
           <h1 className="text-[10px] font-semibold text-gray-800">{dateRangeLabel}</h1>
           <ChevronDown className="h-2.5 w-2.5 text-gray-400" />
         </div>
+        <span className="ml-auto flex items-center gap-1 rounded-full bg-red-600 px-2 py-0.5 text-[10px] font-semibold text-white sm:hidden">
+          Emails {score}
+        </span>
       </div>
 
       {/* Day header row */}
@@ -164,6 +304,18 @@ const GameView = () => {
           {grid.map((row, y) => row.map((_, x) => (
             <RenderCell key={`${x}-${y}`} x={x} y={y} />
           )))}
+          {settledGroups.map((g, i) => {
+            const data = MEETING_DATA[g.type];
+            if (!data) return null;
+            const box = { ...getWidestRunBox(g.cells, CELL_SIZE), label: data.label };
+            return <PieceLabel key={i} box={box} className={`text-[7px] font-medium ${data.text}`} />;
+          })}
+          {activeCellCoords.length > 0 && (
+            <PieceLabel
+              box={{ ...getWidestRunBox(activeCellCoords, CELL_SIZE), label: MEETING_DATA[activePiece.type]?.label }}
+              className="text-[7px] font-semibold text-white"
+            />
+          )}
           {status === 'playing' && (
             <div
               className="pointer-events-none absolute left-0 right-0 flex items-center"
@@ -181,6 +333,18 @@ const GameView = () => {
             </div>
           )}
         </div>
+      </div>
+      <div className="flex shrink-0 items-center justify-center gap-2 border-t bg-white p-2 sm:hidden">
+        {touchControls.map(({ label, icon: Icon, onPress }) => (
+          <button
+            key={label}
+            aria-label={label}
+            onClick={onPress}
+            className="flex h-11 w-11 items-center justify-center rounded-full border border-gray-300 bg-gray-50 text-gray-700 active:bg-gray-200"
+          >
+            <Icon className="h-5 w-5" />
+          </button>
+        ))}
       </div>
       </div>
     </div>
