@@ -241,9 +241,12 @@ const GameView = () => {
   });
 
   return (
-    <div className="flex h-full w-full bg-gray-50 font-sans">
+    <div className="mx-auto flex h-full w-fit bg-gray-50 font-sans">
       <Sidebar highlightedDate={getColumnDate(currentDayCol)} score={score} />
-      <div className="flex flex-1 flex-col overflow-hidden">
+      <div
+        className="flex flex-col overflow-hidden"
+        style={{ width: GUTTER_WIDTH + COLS * CELL_SIZE, maxWidth: '100%' }}
+      >
       {/* Top toolbar */}
       <div ref={toolbarRef} className="flex items-center gap-1 border-b bg-white px-1.5 py-0.5">
         <button className="flex items-center gap-0.5 rounded border border-gray-300 px-1 py-px text-[10px] text-gray-700 hover:bg-gray-50">
@@ -259,7 +262,7 @@ const GameView = () => {
           </button>
         </div>
         <div className="flex items-center gap-0.5">
-          <h1 className="text-[10px] font-semibold text-gray-800">{dateRangeLabel}</h1>
+          <h1 className="whitespace-nowrap text-[8px] font-semibold text-gray-800">{dateRangeLabel}</h1>
           <ChevronDown className="h-2.5 w-2.5 text-gray-400" />
         </div>
         <span className="ml-auto flex items-center gap-1 rounded-full bg-red-600 px-2 py-0.5 text-[10px] font-semibold text-white sm:hidden">
