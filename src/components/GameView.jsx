@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { Calendar, ChevronLeft, ChevronRight, ChevronDown, Plus, RotateCw, ArrowLeft, ArrowRight, ArrowDown, RotateCcw } from 'lucide-react';
 import { useTetris } from '../hooks/useTetris';
 import Sidebar from './Sidebar';
@@ -15,23 +15,37 @@ const MAX_CELL_SIZE = 32;
 const MIN_CELL_SIZE = 18;
 
 // Computes a cell size (and matching gutter width) that keeps the whole
-// board visible on narrow/mobile viewports instead of overflowing.
-const useResponsiveMetrics = () => {
+// board visible on narrow/mobile viewports instead of overflowing, both
+// horizontally (10 columns) and vertically (20 rows plus surrounding chrome).
+const useResponsiveMetrics = (chromeRefs) => {
   const [metrics, setMetrics] = useState({ cellSize: MAX_CELL_SIZE, gutterWidth: 56 });
 
   useEffect(() => {
     const compute = () => {
       const isMobile = window.innerWidth < 640;
       const gutterWidth = isMobile ? 36 : 56;
-      const available = window.innerWidth - gutterWidth - (isMobile ? 8 : 16);
-      const maxFit = Math.floor(available / COLS);
-      const cellSize = Math.max(MIN_CELL_SIZE, Math.min(MAX_CELL_SIZE, maxFit));
+
+      const horizontalAvailable = window.innerWidth - gutterWidth - (isMobile ? 8 : 16);
+      const widthCell = Math.floor(horizontalAvailable / COLS);
+
+      let cellSize = Math.max(MIN_CELL_SIZE, Math.min(MAX_CELL_SIZE, widthCell));
+
+      if (isMobile) {
+        const chromeHeight = chromeRefs.reduce(
+          (sum, ref) => sum + (ref.current?.offsetHeight || 0),
+          0
+        );
+        const verticalAvailable = window.innerHeight - chromeHeight - 8;
+        const heightCell = Math.floor(verticalAvailable / ROWS);
+        cellSize = Math.max(MIN_CELL_SIZE, Math.min(cellSize, heightCell));
+      }
+
       setMetrics({ cellSize, gutterWidth });
     };
     compute();
     window.addEventListener('resize', compute);
     return () => window.removeEventListener('resize', compute);
-  }, []);
+  }, [chromeRefs]);
 
   return metrics;
 };
@@ -146,7 +160,11 @@ const PieceLabel = ({ box, className }) => (
 
 const GameView = () => {
   const { grid, activePiece, status, score, movePiece, rotatePiece, hardDrop } = useTetris();
-  const { cellSize: CELL_SIZE, gutterWidth: GUTTER_WIDTH } = useResponsiveMetrics();
+  const toolbarRef = useRef(null);
+  const dayHeaderRef = useRef(null);
+  const controlsRef = useRef(null);
+  const chromeRefs = useMemo(() => [toolbarRef, dayHeaderRef, controlsRef], []);
+  const { cellSize: CELL_SIZE, gutterWidth: GUTTER_WIDTH } = useResponsiveMetrics(chromeRefs);
 
   const startDate = getColumnDate(0);
   const endDate = getColumnDate(COLS - 1);
@@ -227,7 +245,7 @@ const GameView = () => {
       <Sidebar highlightedDate={getColumnDate(currentDayCol)} score={score} />
       <div className="flex flex-1 flex-col overflow-hidden">
       {/* Top toolbar */}
-      <div className="flex items-center gap-1 border-b bg-white px-1.5 py-0.5">
+      <div ref={toolbarRef} className="flex items-center gap-1 border-b bg-white px-1.5 py-0.5">
         <button className="flex items-center gap-0.5 rounded border border-gray-300 px-1 py-px text-[10px] text-gray-700 hover:bg-gray-50">
           <Calendar className="h-2.5 w-2.5" />
           Today
@@ -250,7 +268,7 @@ const GameView = () => {
       </div>
 
       {/* Day header row */}
-      <div className="flex border-b bg-white">
+      <div ref={dayHeaderRef} className="flex border-b bg-white">
         <div style={{ width: GUTTER_WIDTH }} className="shrink-0" />
         <div
           className="grid"
@@ -334,7 +352,7 @@ const GameView = () => {
           )}
         </div>
       </div>
-      <div className="flex shrink-0 items-center justify-center gap-2 border-t bg-white p-2 sm:hidden">
+      <div ref={controlsRef} className="flex shrink-0 items-center justify-center gap-2 border-t bg-white p-2 sm:hidden">
         {touchControls.map(({ label, icon: Icon, onPress }) => (
           <button
             key={label}
